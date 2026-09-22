@@ -356,6 +356,50 @@
     doc.text(`GRAND TOTAL: ${formatRp(grandTotal)}`, 14, doc.lastAutoTable.finalY + 10);
     doc.save(`Laporan-Scan-${Date.now()}.pdf`);
   }
+
+  function uploadMasterJSON() {
+    const fileInput = document.getElementById("json-file");
+    const file = fileInput.files[0];
+
+    if (!file) {
+      alert("Harap pilih file .json terlebih dahulu!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        let jsonString = e.target.result;
+
+        // 1. Bersihkan Karakter Tersembunyi (BOM) & spasi di awal/akhir
+        jsonString = jsonString.replace(/^\uFEFF/, '').trim();
+
+        // 2. Ubah tanda petik lengkung bawaan HP (smart quotes) menjadi petik lurus standar
+        jsonString = jsonString
+          .replace(/[“”]/g, '"')
+          .replace(/[‘’]/g, "'");
+
+        // 3. Parse data
+        const parsedData = JSON.parse(jsonString);
+
+        if (!Array.isArray(parsedData)) {
+          alert("Format file JSON harus berupa Array / Daftar Objek [...] !");
+          return;
+        }
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsedData));
+        masterData = parsedData;
+
+        alert(`Berhasil meng-upload & menyimpan ${parsedData.length} data produk ke LocalStorage!`);
+        fileInput.value = "";
+        loadMasterFromStorage();
+      } catch (err) {
+        alert("Gagal membaca file JSON di HP!\n\nDetail Error: " + err.message + "\n\nSaran: Pastikan file di-upload dari Google Drive/Storage HP tanpa di-edit di aplikasi Chat.");
+      }
+    };
+
+    reader.readAsText(file, "UTF-8");
+  }
 </script>
 
 </body>
