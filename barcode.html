@@ -1,0 +1,480 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scan Produk & Export PDF + Visual Barcode (V3)</title>
+  
+  <!-- Library Kamera Scanner -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <!-- Library Barcode Generator -->
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <!-- Library Export PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f6f8;
+      margin: 0;
+      padding: 16px;
+    }
+    .container {
+      max-width: 950px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #ffffff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+    h2, h3 { margin-top: 0; color: #1a1a1a; }
+    
+    /* Master Data Controls */
+    .master-box {
+      background: #eef2f7;
+      border: 1px solid #d0d7de;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-weight: bold;
+      background-color: #d1e7dd;
+      color: #0f5132;
+      margin-bottom: 10px;
+    }
+
+    /* Scanner Area */
+    #reader {
+      width: 100%;
+      max-width: 400px;
+      margin: 0 auto 16px auto;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    .form-control {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      margin-bottom: 10px;
+    }
+
+    .btn-group-custom {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: #007bff; color: white; }
+    .btn-success { background: #28a745; color: white; }
+    .btn-danger { background: #dc3545; color: white; }
+    .btn-warning { background: #ffc107; color: #111; }
+    .btn-secondary { background: #6c757d; color: white; }
+
+    /* Table Output */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: left;
+      font-size: 0.9rem;
+      vertical-align: middle;
+    }
+    th { background-color: #007bff; color: white; }
+    .barcode-td {
+      text-align: center;
+      min-width: 130px;
+    }
+    .barcode-td svg {
+      max-width: 100%;
+      height: auto;
+    }
+    .qty-input {
+      width: 60px;
+      padding: 6px;
+      text-align: center;
+    }
+    .summary-box {
+      margin-top: 16px;
+      text-align: right;
+      font-size: 1.1rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Master Data Panel -->
+  <div class="card">
+    <h3>⚙️ Pengelolaan Master Data Produk</h3>
+    <div class="master-box">
+      <div id="master-status" class="status-badge">Memuat status...</div>
+      
+      <div class="form-group" style="margin-bottom: 10px;">
+        <label for="json-file" style="font-weight: bold; display: block; margin-bottom: 4px;">Upload File JSON Master Data Baru:</label>
+        <input type="file" id="json-file" accept=".json" class="form-control" style="background: white;">
+      </div>
+
+      <div class="btn-group-custom">
+        <button class="btn btn-primary" onclick="uploadMasterJSON()">📥 Upload Data JSON</button>
+        <button class="btn btn-danger" onclick="resetMasterData()">🔄 Reset Master Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section Scan / Input -->
+  <div class="card">
+    <h2>Pindai Produk</h2>
+    
+    <!-- Kamera Scanner View -->
+    <div id="reader"></div>
+
+    <div class="btn-group-custom" style="margin-bottom: 12px;">
+      <button class="btn btn-warning" onclick="startCamera()">📷 Buka Kamera</button>
+      <button class="btn btn-secondary" onclick="stopCamera()">⏹️ Tutup Kamera</button>
+    </div>
+
+    <!-- Manual / USB Barcode Scanner Input -->
+    <input type="text" id="barcode-input" class="form-control" placeholder="Arahkan scanner kasir ke sini atau ketik barcode..." autofocus onkeypress="handleKeyPress(event)">
+  </div>
+
+  <!-- Table Hasil Scan -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+      <h3>Daftar Produk Ter-scan</h3>
+      <div class="btn-group-custom">
+        <button class="btn btn-danger" onclick="clearScanList()">🗑️ Bersihkan List</button>
+        <button class="btn btn-success" onclick="exportPDF()">📄 Export Ke PDF</button>
+      </div>
+    </div>
+
+    <table id="scan-table">
+      <thead>
+        <tr>
+          <th>PLU</th>
+          <th style="text-align: center;">Kode Batang</th>
+          <th>Deskripsi Barang</th>
+          <th>Harga (Rp)</th>
+          <th>Jumlah</th>
+          <th>Total (Rp)</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody id="scan-list">
+        <!-- Item akan muncul di sini -->
+      </tbody>
+    </table>
+
+    <div class="summary-box">
+      Grand Total: <span id="grand-total" style="color: #007bff;">Rp0</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const STORAGE_KEY = "APP_MASTER_DATA_V1";
+
+  let masterData = [];
+  let scannedItems = [];
+  let html5QrCode = null;
+
+  window.addEventListener("DOMContentLoaded", () => {
+    loadMasterFromStorage();
+  });
+
+  function loadMasterFromStorage() {
+    const storedData = localStorage.getItem(STORAGE_KEY);
+    const statusBadge = document.getElementById("master-status");
+
+    if (storedData) {
+      try {
+        masterData = JSON.parse(storedData);
+        statusBadge.innerHTML = `✅ Master Data Aktif: <strong>${masterData.length} Produk</strong> (Tersimpan di Browser)`;
+        statusBadge.style.backgroundColor = "#d1e7dd";
+        statusBadge.style.color = "#0f5132";
+      } catch (e) {
+        statusBadge.innerText = "⚠️ Data di LocalStorage rusak. Silakan upload ulang.";
+        masterData = [];
+      }
+    } else {
+      statusBadge.innerText = "ℹ️ Belum ada Master Data tersimpan. Silakan upload file .json produk kamu.";
+      statusBadge.style.backgroundColor = "#fff3cd";
+      statusBadge.style.color = "#664d03";
+      masterData = [];
+    }
+  }
+
+  function uploadMasterJSON() {
+    const fileInput = document.getElementById("json-file");
+    const file = fileInput.files[0];
+
+    if (!file) {
+      alert("Harap pilih file .json terlebih dahulu!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const parsedData = JSON.parse(e.target.result);
+
+        if (!Array.isArray(parsedData)) {
+          alert("Format file JSON harus berupa Array / Daftar Objek [...] !");
+          return;
+        }
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsedData));
+        masterData = parsedData;
+
+        alert(`Berhasil meng-upload & menyimpan ${parsedData.length} data produk ke LocalStorage!`);
+        fileInput.value = "";
+        loadMasterFromStorage();
+      } catch (err) {
+        alert("Gagal membaca file JSON. Pastikan struktur file JSON sudah benar!");
+      }
+    };
+
+    reader.readAsText(file);
+  }
+
+  function resetMasterData() {
+    if (confirm("Apakah kamu yakin ingin menghapus Master Data yang tersimpan di browser ini?")) {
+      localStorage.removeItem(STORAGE_KEY);
+      masterData = [];
+      loadMasterFromStorage();
+      alert("Master Data berhasil dihapus!");
+    }
+  }
+
+  function formatRp(angka) {
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka);
+  }
+
+  function processScan(code) {
+    const codeClean = code.trim();
+    if (!codeClean) return;
+
+    if (masterData.length === 0) {
+      alert("Master Data masih kosong! Silakan upload file JSON terlebih dahulu.");
+      return;
+    }
+
+    const product = masterData.find(p => p.barcode === codeClean || p.plu === codeClean);
+
+    if (!product) {
+      alert(`Produk dengan Barcode/PLU "${codeClean}" tidak ditemukan di Master Data!`);
+      return;
+    }
+
+    const existingIndex = scannedItems.findIndex(item => item.plu === product.plu);
+
+    if (existingIndex > -1) {
+      scannedItems[existingIndex].qty += 1;
+    } else {
+      scannedItems.push({
+        plu: product.plu,
+        barcode: product.barcode,
+        descp: product.descp,
+        price: product.price1,
+        qty: 1
+      });
+    }
+
+    renderTable();
+    document.getElementById("barcode-input").value = "";
+    document.getElementById("barcode-input").focus();
+  }
+
+  function handleKeyPress(e) {
+    if (e.key === 'Enter') {
+      processScan(e.target.value);
+    }
+  }
+
+  function updateQty(index, newQty) {
+    const qtyNum = parseInt(newQty) || 0;
+    if (qtyNum <= 0) {
+      removeItem(index);
+    } else {
+      scannedItems[index].qty = qtyNum;
+      renderTable();
+    }
+  }
+
+  function removeItem(index) {
+    scannedItems.splice(index, 1);
+    renderTable();
+  }
+
+  function clearScanList() {
+    if (scannedItems.length === 0) return;
+    if (confirm("Bersihkan semua daftar hasil scan?")) {
+      scannedItems = [];
+      renderTable();
+    }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById("scan-list");
+    tbody.innerHTML = "";
+    let grandTotal = 0;
+
+    scannedItems.forEach((item, index) => {
+      const subtotal = item.price * item.qty;
+      grandTotal += subtotal;
+      const barcodeSvgId = `barcode-svg-${index}`;
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.plu}</td>
+        <td class="barcode-td"><svg id="${barcodeSvgId}"></svg></td>
+        <td>${item.descp}</td>
+        <td>${formatRp(item.price)}</td>
+        <td>
+          <input type="number" class="qty-input" value="${item.qty}" min="1" onchange="updateQty(${index}, this.value)">
+        </td>
+        <td><strong>${formatRp(subtotal)}</strong></td>
+        <td><button class="btn btn-danger" onclick="removeItem(${index})">Hapus</button></td>
+      `;
+      tbody.appendChild(row);
+
+      // Render Visual Barcode SVG ke Tabel Web
+      if (item.barcode) {
+        JsBarcode(`#${barcodeSvgId}`, item.barcode, {
+          format: "CODE128",
+          width: 1.2,
+          height: 35,
+          displayValue: true,
+          fontSize: 10,
+          margin: 0
+        });
+      }
+    });
+
+    document.getElementById("grand-total").innerText = formatRp(grandTotal);
+  }
+
+  // Integrasi Kamera
+  function startCamera() {
+    if (!html5QrCode) {
+      html5QrCode = new Html5Qrcode("reader");
+    }
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 150 } },
+      (decodedText) => {
+        processScan(decodedText);
+      },
+      (errorMessage) => {}
+    ).catch(err => alert("Gagal membuka kamera: " + err));
+  }
+
+  function stopCamera() {
+    if (html5QrCode) {
+      html5QrCode.stop().then(() => {
+        document.getElementById("reader").innerHTML = "";
+      });
+    }
+  }
+
+  // Helper untuk generate gambar Barcode PNG untuk PDF
+  function generateBarcodeImage(barcodeText) {
+    const canvas = document.createElement("canvas");
+    JsBarcode(canvas, barcodeText, {
+      format: "CODE128",
+      width: 1.5,
+      height: 40,
+      displayValue: true,
+      fontSize: 10,
+      margin: 0
+    });
+    return canvas.toDataURL("image/png");
+  }
+
+  // Export PDF dengan Gambar Barcode
+  function exportPDF() {
+    if (scannedItems.length === 0) {
+      alert("Belum ada data produk yang di-scan!");
+      return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("LAPORAN HASIL SCAN PRODUK", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Tanggal Cetak: ${new Date().toLocaleString('id-ID')}`, 14, 22);
+
+    // Kolom Barcode dikosongkan karena akan digambar ulang menggunakan PNG
+    const tableData = scannedItems.map(item => [
+      item.plu,
+      "", 
+      item.descp,
+      formatRp(item.price),
+      item.qty,
+      formatRp(item.price * item.qty)
+    ]);
+
+    let grandTotal = scannedItems.reduce((acc, item) => acc + (item.price * item.qty), 0);
+
+    doc.autoTable({
+      startY: 28,
+      head: [['PLU', 'Kode Batang', 'Deskripsi Barang', 'Harga', 'Qty', 'Total']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [0, 123, 255] },
+      styles: { verticalAlign: 'middle' },
+      columnStyles: {
+        1: { cellWidth: 42, minCellHeight: 16 } // Ruang khusus untuk gambar barcode
+      },
+      didDrawCell: function(data) {
+        // Tempel gambar barcode ke dalam sel tabel PDF di kolom 'Kode Batang' (index 1)
+        if (data.section === 'body' && data.column.index === 1) {
+          const item = scannedItems[data.row.index];
+          if (item && item.barcode) {
+            const imgData = generateBarcodeImage(item.barcode);
+            doc.addImage(imgData, 'PNG', data.cell.x + 2, data.cell.y + 2, 38, 12);
+          }
+        }
+      }
+    });
+
+    const finalY = doc.lastAutoTable.finalY + 10;
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(`GRAND TOTAL: ${formatRp(grandTotal)}`, 14, finalY);
+
+    doc.save(`Laporan-Scan-${Date.now()}.pdf`);
+  }
+</script>
+
+</body>
+</html>
