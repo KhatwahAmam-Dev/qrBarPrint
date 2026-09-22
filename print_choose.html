@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scan Produk & Struk Kasir (V4)</title>
+  
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f4f6f8;
+      margin: 0;
+      padding: 16px;
+    }
+    .container { max-width: 950px; margin: 0 auto; }
+    .card {
+      background: #ffffff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      margin-bottom: 20px;
+    }
+    h2, h3 { margin-top: 0; color: #1a1a1a; }
+    
+    .nav-link {
+      display: inline-block;
+      margin-bottom: 15px;
+      color: #007bff;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    
+    .form-control {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      margin-bottom: 10px;
+    }
+
+    .btn-group-custom { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: #007bff; color: white; }
+    .btn-success { background: #28a745; color: white; }
+    .btn-danger { background: #dc3545; color: white; }
+    .btn-warning { background: #ffc107; color: #111; }
+    .btn-secondary { background: #6c757d; color: white; }
+    .btn-dark { background: #343a40; color: white; }
+
+    #reader { width: 100%; max-width: 400px; margin: 0 auto 16px auto; border-radius: 8px; overflow: hidden; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 0.9rem; vertical-align: middle; }
+    th { background-color: #007bff; color: white; }
+    .barcode-td { text-align: center; min-width: 130px; }
+    .barcode-td svg { max-width: 100%; height: auto; }
+    .qty-input { width: 60px; padding: 6px; text-align: center; }
+    .summary-box { margin-top: 16px; text-align: right; font-size: 1.1rem; font-weight: bold; }
+
+    /* LAYOUT KHUSUS PRINTER THERMAL (STRUK KASIR 58mm) */
+    #receipt-area { display: none; }
+    @media print {
+      body * { visibility: hidden; }
+      #receipt-area, #receipt-area * { visibility: visible; }
+      #receipt-area {
+        display: block !important;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 58mm;
+        padding: 5px;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 11px;
+        color: #000;
+      }
+      .receipt-header { text-align: center; margin-bottom: 10px; }
+      .receipt-title { font-weight: bold; font-size: 14px; text-transform: uppercase; }
+      .receipt-divider { border-top: 1px dashed #000; margin: 6px 0; }
+      .receipt-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+      .receipt-item-title { font-weight: bold; margin-top: 4px; }
+      .receipt-footer { text-align: center; margin-top: 10px; font-size: 10px; }
+      .receipt-barcode { text-align: center; margin-top: 8px; }
+      .receipt-barcode svg { max-width: 100%; height: 35px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <a href="index.html" class="nav-link">⬅️ Kembali ke Dashboard Utama</a>
+
+  <!-- Section Scan -->
+  <div class="card">
+    <h2>Pindai Produk Kasir</h2>
+    <div id="reader"></div>
+    <div class="btn-group-custom" style="margin-bottom: 12px;">
+      <button class="btn btn-warning" onclick="startCamera()">📷 Buka Kamera</button>
+      <button class="btn btn-secondary" onclick="stopCamera()">⏹️ Tutup Kamera</button>
+    </div>
+    <input type="text" id="barcode-input" class="form-control" placeholder="Scan barcode produk di sini..." autofocus onkeypress="handleKeyPress(event)">
+  </div>
+
+  <!-- Table Hasil Scan -->
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+      <h3>Daftar Belanjaan</h3>
+      <div class="btn-group-custom">
+        <button class="btn btn-danger" onclick="clearScanList()">🗑️ Bersihkan List</button>
+        <button class="btn btn-dark" onclick="printReceipt()">🖨️ Cetak Struk Kasir</button>
+        <button class="btn btn-success" onclick="exportPDF()">📄 Export PDF</button>
+      </div>
+    </div>
+
+    <table id="scan-table">
+      <thead>
+        <tr>
+          <th>PLU</th>
+          <th style="text-align: center;">Kode Batang</th>
+          <th>Deskripsi</th>
+          <th>Harga</th>
+          <th>Qty</th>
+          <th>Total</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody id="scan-list"></tbody>
+    </table>
+
+    <div class="summary-box">
+      Grand Total: <span id="grand-total" style="color: #007bff;">Rp0</span>
+    </div>
+  </div>
+</div>
+
+<!-- CONTAINER TERSEBUNYI UNTUK STRUK THERMAL -->
+<div id="receipt-area">
+  <div class="receipt-header">
+    <div class="receipt-title" id="receipt-store-name">TOKO SERBA ADA</div>
+    <div id="receipt-store-address">Jl. Utama No. 123, Sragen</div>
+    <div id="receipt-date" style="font-size: 9px; margin-top: 4px;"></div>
+  </div>
+  <div class="receipt-divider"></div>
+  <div id="receipt-items"></div>
+  <div class="receipt-divider"></div>
+  <div class="receipt-row" style="font-weight: bold; font-size: 12px;">
+    <span>TOTAL:</span>
+    <span id="receipt-grand-total">Rp0</span>
+  </div>
+  <div class="receipt-divider"></div>
+  <div class="receipt-barcode">
+    <svg id="receipt-barcode-svg"></svg>
+  </div>
+  <div class="receipt-footer">
+    *** TERIMA KASIH ***<br>
+    Barang yang sudah dibeli<br>tidak dapat ditukar.
+  </div>
+</div>
+
+<script>
+  const STORAGE_KEY = "APP_MASTER_DATA_V1";
+  const CONFIG_KEY = "APP_STORE_CONFIG";
+
+  let masterData = [];
+  let scannedItems = [];
+  let html5QrCode = null;
+
+  window.addEventListener("DOMContentLoaded", () => {
+    const storedMaster = localStorage.getItem(STORAGE_KEY);
+    if (storedMaster) {
+      try { masterData = JSON.parse(storedMaster); } catch(e){}
+    }
+    
+    // Load store profile if exists
+    const storedConfig = localStorage.getItem(CONFIG_KEY);
+    if (storedConfig) {
+      const config = JSON.parse(storedConfig);
+      document.getElementById("receipt-store-name").innerText = config.name || "TOKO SERBA ADA";
+      document.getElementById("receipt-store-address").innerText = config.address || "Jl. Utama No. 123";
+    }
+  });
+
+  function formatRp(angka) {
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka);
+  }
+
+  function processScan(code) {
+    const codeClean = code.trim();
+    if (!codeClean) return;
+
+    if (masterData.length === 0) {
+      alert("Master Data belum diupload di Dashboard!");
+      return;
+    }
+
+    const product = masterData.find(p => p.barcode === codeClean || p.plu === codeClean);
+    if (!product) {
+      alert(`Produk "${codeClean}" tidak ditemukan!`);
+      return;
+    }
+
+    const existingIndex = scannedItems.findIndex(item => item.plu === product.plu);
+    if (existingIndex > -1) {
+      scannedItems[existingIndex].qty += 1;
+    } else {
+      scannedItems.push({
+        plu: product.plu,
+        barcode: product.barcode,
+        descp: product.descp,
+        price: product.price1,
+        qty: 1
+      });
+    }
+
+    renderTable();
+    document.getElementById("barcode-input").value = "";
+    document.getElementById("barcode-input").focus();
+  }
+
+  function handleKeyPress(e) { if (e.key === 'Enter') processScan(e.target.value); }
+
+  function updateQty(index, newQty) {
+    const qtyNum = parseInt(newQty) || 0;
+    if (qtyNum <= 0) { scannedItems.splice(index, 1); } 
+    else { scannedItems[index].qty = qtyNum; }
+    renderTable();
+  }
+
+  function removeItem(index) { scannedItems.splice(index, 1); renderTable(); }
+  function clearScanList() { if (confirm("Bersihkan daftar transaksi?")) { scannedItems = []; renderTable(); } }
+
+  function renderTable() {
+    const tbody = document.getElementById("scan-list");
+    tbody.innerHTML = "";
+    let grandTotal = 0;
+
+    scannedItems.forEach((item, index) => {
+      const subtotal = item.price * item.qty;
+      grandTotal += subtotal;
+      const barcodeSvgId = `barcode-svg-${index}`;
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${item.plu}</td>
+        <td class="barcode-td"><svg id="${barcodeSvgId}"></svg></td>
+        <td>${item.descp}</td>
+        <td>${formatRp(item.price)}</td>
+        <td><input type="number" class="qty-input" value="${item.qty}" min="1" onchange="updateQty(${index}, this.value)"></td>
+        <td><strong>${formatRp(subtotal)}</strong></td>
+        <td><button class="btn btn-danger" onclick="removeItem(${index})">Hapus</button></td>
+      `;
+      tbody.appendChild(row);
+
+      if (item.barcode) {
+        JsBarcode(`#${barcodeSvgId}`, item.barcode, { format: "CODE128", width: 1.2, height: 30, displayValue: true, fontSize: 10, margin: 0 });
+      }
+    });
+
+    document.getElementById("grand-total").innerText = formatRp(grandTotal);
+  }
+
+  function startCamera() {
+    if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 150 } }, (code) => processScan(code), () => {});
+  }
+  function stopCamera() { if (html5QrCode) html5QrCode.stop().then(() => { document.getElementById("reader").innerHTML = ""; }); }
+
+  // CETAK STRUK KASIR (PRINT THERMAL)
+  function printReceipt() {
+    if (scannedItems.length === 0) {
+      alert("Belum ada barang di dalam daftar!");
+      return;
+    }
+
+    const container = document.getElementById("receipt-items");
+    container.innerHTML = "";
+    let total = 0;
+    const trxId = "TRX-" + Date.now().toString().slice(-6);
+
+    document.getElementById("receipt-date").innerText = `Tgl: ${new Date().toLocaleString('id-ID')} | NO: ${trxId}`;
+
+    scannedItems.forEach(item => {
+      const subtotal = item.price * item.qty;
+      total += subtotal;
+
+      const itemEl = document.createElement("div");
+      itemEl.innerHTML = `
+        <div class="receipt-item-title">${item.descp}</div>
+        <div class="receipt-row">
+          <span>${item.qty} x ${formatRp(item.price)}</span>
+          <span>${formatRp(subtotal)}</span>
+        </div>
+      `;
+      container.appendChild(itemEl);
+    });
+
+    document.getElementById("receipt-grand-total").innerText = formatRp(total);
+
+    // Render Barcode Transaksi di Struk
+    JsBarcode("#receipt-barcode-svg", trxId, {
+      format: "CODE128", width: 1.3, height: 30, displayValue: true, fontSize: 9, margin: 0
+    });
+
+    // Panggil cetak browser
+    window.print();
+  }
+
+  // EXPORT PDF
+  function exportPDF() {
+    if (scannedItems.length === 0) { alert("Daftar scan masih kosong!"); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text("LAPORAN HASIL SCAN PRODUK", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Tanggal: ${new Date().toLocaleString('id-ID')}`, 14, 22);
+
+    const tableData = scannedItems.map(item => [item.plu, "", item.descp, formatRp(item.price), item.qty, formatRp(item.price * item.qty)]);
+    let grandTotal = scannedItems.reduce((acc, item) => acc + (item.price * item.qty), 0);
+
+    doc.autoTable({
+      startY: 28,
+      head: [['PLU', 'Kode Batang', 'Deskripsi', 'Harga', 'Qty', 'Total']],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [0, 123, 255] },
+      columnStyles: { 1: { cellWidth: 42, minCellHeight: 16 } },
+      didDrawCell: function(data) {
+        if (data.section === 'body' && data.column.index === 1) {
+          const item = scannedItems[data.row.index];
+          if (item && item.barcode) {
+            const canvas = document.createElement("canvas");
+            JsBarcode(canvas, item.barcode, { format: "CODE128", width: 1.5, height: 40, displayValue: true, fontSize: 10, margin: 0 });
+            doc.addImage(canvas.toDataURL("image/png"), 'PNG', data.cell.x + 2, data.cell.y + 2, 38, 12);
+          }
+        }
+      }
+    });
+
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(`GRAND TOTAL: ${formatRp(grandTotal)}`, 14, doc.lastAutoTable.finalY + 10);
+    doc.save(`Laporan-Scan-${Date.now()}.pdf`);
+  }
+</script>
+
+</body>
+</html>
